@@ -7,7 +7,7 @@ library(readr)
 library(srvyr)
 
 # ── 1. Load data ──────────────────────────────────────────────────────────────
-csv_path <- "/Users/matheusrech/Downloads/fingertips-br/files/elsi_native_addons/app/elsi_data.csv"
+csv_path <- "app/elsi_data.csv"
 
 cat("Reading ELSI data...\n")
 elsi <- read_csv(csv_path, show_col_types = FALSE)
@@ -78,7 +78,7 @@ regional <- svy |>
 cat("Done.\n")
 
 # ── 5. Save ───────────────────────────────────────────────────────────────────
-out_dir <- "/Users/matheusrech/Downloads/fingertips-br/files/elsi_native_addons/analysis/data"
+out_dir <- "analysis/data"
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 out_path <- file.path(out_dir, "elsi_regional.rds")
 saveRDS(regional, out_path)

@@ -21,7 +21,7 @@ suppressPackageStartupMessages({
 })
 
 # ── paths ──────────────────────────────────────────────────────────────────────
-BASE <- "/Users/matheusrech/Downloads/fingertips-br/files/elsi_native_addons/analysis"
+BASE <- "analysis"
 DATA <- file.path(BASE, "data", "apac_cohort.rds")
 FIGS <- file.path(BASE, "figures")
 TABS <- file.path(BASE, "tables")

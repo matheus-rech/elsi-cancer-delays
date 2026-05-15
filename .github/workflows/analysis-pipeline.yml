@@ -52,7 +52,7 @@ jobs:
           .libPaths(Sys.getenv("R_LIBS_USER"))
           install.packages("pak", lib = Sys.getenv("R_LIBS_USER"))
           pak::pak(c(
-            "microdatasus", "dplyr", "tidyr", "lubridate",
+            "rfsaldanha/microdatasus", "dplyr", "tidyr", "lubridate",
             "survival", "survminer", "tidycmprsk", "ggsurvfit",
             "srvyr", "survey", "ggplot2", "patchwork",
             "gtsummary", "gt", "broom",

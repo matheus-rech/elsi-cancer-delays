@@ -10,7 +10,7 @@ suppressPackageStartupMessages({
   }
 })
 
-BASE <- "/Users/matheusrech/Downloads/fingertips-br/files/elsi_native_addons/analysis"
+BASE <- "analysis"
 FIGS <- file.path(BASE, "figures")
 dir.create(FIGS, showWarnings = FALSE, recursive = TRUE)
 
