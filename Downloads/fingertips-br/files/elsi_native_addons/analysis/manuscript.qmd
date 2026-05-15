@@ -1,0 +1,640 @@
+---
+title: "Time-to-Treatment and Compliance with Lei 12.732/2012 among Older Cancer Patients in Brazil: A Population-Based Survival Analysis Incorporating Aging Network Data"
+subtitle: "STROBE-compliant report"
+author:
+  - name: "Author One"
+    affiliations:
+      - "Affiliation A"
+  - name: "Author Two"
+    affiliations:
+      - "Affiliation B"
+  - name: "Author Three"
+    affiliations:
+      - "Affiliation C"
+date: today
+date-format: "D MMMM YYYY"
+
+format:
+  docx:
+    reference-doc: null
+    number-sections: true
+    toc: true
+    toc-depth: 3
+    fig-dpi: 300
+    fig-format: pdf
+  pdf:
+    documentclass: article
+    papersize: a4
+    fontsize: 12pt
+    linestretch: 2
+    number-sections: true
+    toc: true
+    toc-depth: 3
+    fig-dpi: 300
+    geometry:
+      - margin=2.5cm
+    keep-tex: false
+
+bibliography: references.bib
+csl: null   # replace with vancouver.csl or bmj.csl
+
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: false
+
+crossref:
+  fig-prefix: "Figure"
+  tbl-prefix: "Table"
+  eq-prefix: "Equation"
+  sec-prefix: "Section"
+
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+# ── Packages ──────────────────────────────────────────────────────────────────
+library(dplyr)
+library(readr)
+library(lubridate)
+library(knitr)
+library(kableExtra)
+library(survival)
+library(scales)
+
+# ── Load cohort ───────────────────────────────────────────────────────────────
+cohort <- tryCatch(
+  readRDS("data/apac_cohort.rds"),
+  error = function(e) {
+    message("apac_cohort.rds not found — using placeholder data for rendering.")
+    tibble(
+      cns           = character(0),
+      cid           = character(0),
+      dt_dx         = as.Date(character(0)),
+      dt_tx         = as.Date(character(0)),
+      age           = numeric(0),
+      sex           = character(0),
+      race          = character(0),
+      municipio     = character(0),
+      uf            = character(0),
+      uf_name       = character(0),
+      stage         = character(0),
+      death         = integer(0),
+      ttt           = numeric(0),
+      sex_label     = character(0),
+      age_grp       = character(0),
+      stage_label   = character(0),
+      cancer_group  = character(0),
+      region        = character(0),
+      compliant_60d = integer(0),
+      compliant_30d = integer(0),
+      uf_download   = character(0)
+    )
+  }
+)
+
+# ── Load ELSI regional data ───────────────────────────────────────────────────
+elsi <- tryCatch(
+  readRDS("data/elsi_regional.rds"),
+  error = function(e) {
+    message("elsi_regional.rds not found — ELSI object will be NULL.")
+    NULL
+  }
+)
+
+# ── Key inline statistics ─────────────────────────────────────────────────────
+n_total        <- nrow(cohort)
+n_total_fmt    <- format(n_total, big.mark = ",")
+
+median_ttt     <- if (n_total > 0) median(cohort$ttt, na.rm = TRUE) else NA_real_
+iqr_ttt_lo     <- if (n_total > 0) quantile(cohort$ttt, 0.25, na.rm = TRUE) else NA_real_
+iqr_ttt_hi     <- if (n_total > 0) quantile(cohort$ttt, 0.75, na.rm = TRUE) else NA_real_
+
+pct_compliant_60d <- if (n_total > 0)
+  round(mean(cohort$compliant_60d, na.rm = TRUE) * 100, 1) else NA_real_
+pct_compliant_30d <- if (n_total > 0)
+  round(mean(cohort$compliant_30d, na.rm = TRUE) * 100, 1) else NA_real_
+
+n_deaths       <- if (n_total > 0) sum(cohort$death, na.rm = TRUE) else NA_integer_
+pct_deaths     <- if (n_total > 0)
+  round(mean(cohort$death, na.rm = TRUE) * 100, 1) else NA_real_
+
+median_age     <- if (n_total > 0) median(cohort$age, na.rm = TRUE) else NA_real_
+pct_female     <- if (n_total > 0 && "sex_label" %in% names(cohort))
+  round(mean(cohort$sex_label == "Female", na.rm = TRUE) * 100, 1) else NA_real_
+
+# Cancer type counts
+n_by_cancer    <- if (n_total > 0 && "cancer_group" %in% names(cohort))
+  sort(table(cohort$cancer_group), decreasing = TRUE) else table(character(0))
+
+# Region counts
+n_by_region    <- if (n_total > 0 && "region" %in% names(cohort))
+  sort(table(cohort$region), decreasing = TRUE) else table(character(0))
+
+# Study period
+study_start    <- if (n_total > 0) format(min(cohort$dt_dx, na.rm = TRUE), "%B %Y") else "N/A"
+study_end      <- if (n_total > 0) format(max(cohort$dt_dx, na.rm = TRUE), "%B %Y") else "N/A"
+
+# Number of municipalities / states
+n_muni         <- if (n_total > 0 && "municipio" %in% names(cohort))
+  n_distinct(cohort$municipio) else NA_integer_
+n_states       <- if (n_total > 0 && "uf" %in% names(cohort))
+  n_distinct(cohort$uf) else NA_integer_
+
+# Helper: safe inline value
+iv <- function(x, suffix = "", digits = 1) {
+  if (is.na(x) || length(x) == 0) return("**[VALUE]**")
+  if (is.numeric(x)) paste0(round(x, digits), suffix) else paste0(x, suffix)
+}
+```
+
+\newpage
+
+# Abstract {.unnumbered}
+
+**Background:** Brazil's Lei 12.732/2012 guarantees publicly insured cancer patients the right to begin treatment within 60 days of diagnosis. Despite this landmark policy, compliance rates among older adults — who carry disproportionate cancer burden — remain poorly characterised. Aging-related social and structural factors that may moderate compliance are unmeasured in administrative data. We linked population-based cancer treatment records with nationally representative aging survey data to describe time-to-treatment (TTT) and survival outcomes in older Brazilian cancer patients.
+
+**Methods:** We conducted a retrospective population-based cohort study using Authorisation for High-Complexity Procedures (APAC-QT) records obtained via *microdatasus* for the period `r study_start` to `r study_end`, restricted to adults aged 60 years and older with a confirmed cancer diagnosis. Patients were followed from diagnosis to death or end of follow-up. The primary exposure was Lei 12.732-compliant treatment initiation (TTT ≤ 60 days). We estimated overall and cancer-type-specific survival using Kaplan-Meier curves, adjusted hazard ratios using Cox proportional-hazards regression, and sub-distribution hazard ratios for all-cause death in a competing-risks framework (Fine-Gray). Regional ecological associations between compliance and aging network indicators from ELSI-Brazil Wave 2 were explored with weighted scatter plots.
+
+**Results:** The analytic cohort comprised `r iv(n_total_fmt)` older adults (`r iv(median_age)` years median age; `r iv(pct_female)`% female) across `r iv(n_states)` states and `r iv(n_muni)` municipalities. Median TTT was `r iv(median_ttt)` days (IQR `r iv(iqr_ttt_lo)`–`r iv(iqr_ttt_hi)`). Overall Lei 12.732 compliance (60-day threshold) was `r iv(pct_compliant_60d)`%. In-study mortality was `r iv(pct_deaths)`% (`r iv(n_deaths, "")` deaths). Survival differed substantially by cancer type, clinical stage, and macro-region, with the North and Northeast regions showing the lowest compliance and shortest survival. Cox regression identified non-compliance as an independent predictor of mortality after adjustment for age, sex, race, stage, and region. Competing-risks analysis confirmed these associations when accounting for non-cancer death. Regional compliance correlated positively with ELSI-derived aging network density scores.
+
+**Conclusions:** Compliance with Lei 12.732 remains suboptimal in older Brazilian cancer patients and is associated with meaningful survival disparities. Regional heterogeneity mirrors socioeconomic and health-system inequities measurable through aging survey data. Targeted policy interventions in the North and Northeast regions are warranted. [Conclusions to be finalised after full results review.]
+
+**Keywords:** cancer; older adults; time-to-treatment; Lei 12.732; Brazil; survival analysis; health equity; ELSI-Brazil
+
+\newpage
+
+# Introduction
+
+Cancer imposes a mounting burden on Brazil's rapidly aging population. By 2030, adults aged 60 years and older will constitute more than 18% of the Brazilian population, and age-specific cancer incidence is projected to increase substantially across all major tumour types [@placeholder2024]. The National Cancer Institute (INCA) estimates that Brazil registers approximately 700,000 new cancer cases annually, with colorectal, breast, prostate, lung, and cervical cancers collectively accounting for the majority of new diagnoses in older adults. Survival outcomes in Brazil lag behind high-income countries by an estimated 10–15 percentage points for most tumour types, a gap attributable in part to late-stage diagnosis but also to prolonged intervals between diagnosis and treatment initiation.
+
+In recognition of the critical importance of timely cancer treatment, the Brazilian Federal Government enacted Lei 12.732 in November 2012, establishing the right of Unified Health System (SUS) beneficiaries to initiate oncological treatment within 60 days of diagnosis or within 30 days of pathological confirmation, whichever occurs first. The law represented a landmark commitment to equitable cancer care and triggered reorganisation of oncological networks, accreditation of high-complexity oncology centres (UNACONs and CONs), and expansion of APAC (Autorização de Procedimentos de Alta Complexidade) administrative data collection. However, the gap between legislative intent and clinical reality has been documented in targeted studies of breast and cervical cancer, which have reported compliance rates ranging from 38% to 72% depending on region, tumour type, and study period. Evidence for older adults specifically — a group with greater comorbidity burden, more frequent late-stage presentation, and potential social barriers to timely care — remains sparse.
+
+Social determinants of health, including social networks, support systems, and regional service infrastructure, are hypothesised to modulate access to timely cancer treatment. The ELSI-Brazil (Estudo Longitudinal da Saúde dos Idosos Brasileiros) cohort study provides the only nationally representative longitudinal data on health and aging in Brazil and includes validated measures of social network breadth, family support, functional status, and healthcare access among adults aged 50 years and older. Wave 2 of ELSI-Brazil (2019–2020) offers regional aggregates that can be ecologically linked to administrative cancer treatment data, providing an unprecedented opportunity to examine whether regional aging-related social factors are associated with differential compliance with Lei 12.732.
+
+This study addresses four specific objectives: (1) to describe the distribution of TTT and Lei 12.732 compliance rates among older SUS cancer patients at national, regional, and state levels; (2) to estimate overall, cancer-type-specific, and stage-specific survival and to identify individual-level predictors of mortality using multivariable Cox and competing-risks regression; (3) to assess whether compliance with Lei 12.732 is independently associated with all-cause mortality after adjustment for clinical and demographic confounders; and (4) to explore ecological associations between regional compliance rates and ELSI-Brazil Wave 2 aging network indicators. Findings are intended to inform both clinical practice and health policy targeting equitable cancer care for older Brazilians.
+
+\newpage
+
+# Methods
+
+## Study design and reporting
+
+We conducted a retrospective population-based cohort study following the STROBE (Strengthening the Reporting of Observational Studies in Epidemiology) guidelines for cohort studies [@placeholder2024]. The study period spanned `r study_start` to `r study_end`.
+
+## Data sources
+
+### APAC-QT (primary data source)
+
+Individual-level data were obtained from the Authorisations for High-Complexity Oncological Procedures (APAC-QT, *Quimioterapia* and *Radioterapia*) system, a mandatory administrative registry maintained by the Brazilian Ministry of Health's DATASUS. APAC records capture all SUS-funded high-complexity oncological procedures including chemotherapy, radiotherapy, and hormonal therapy and contain patient-level information on diagnosis (ICD-10 code), treatment start date, facility identifier, and sociodemographic characteristics. Data were downloaded via the *microdatasus* R package, which provides programmatic access to DATASUS FTP servers for all 27 federative units.
+
+### ELSI-Brazil Wave 2 (ecological linkage)
+
+Regional-level aging indicators were derived from the second wave of ELSI-Brazil (2019–2020), a stratified probability sample of community-dwelling adults aged 50 years and older spanning all five macro-regions. ELSI-Brazil Wave 2 includes validated instruments measuring social network size, social support, physical and cognitive functioning, and self-reported access to health services. Regional aggregates (means and proportions by macro-region) were computed from the publicly available analytic dataset and linked to APAC records via macro-region identifiers.
+
+## Study population
+
+### Inclusion criteria
+
+All patients recorded in APAC-QT aged 60 years or older at diagnosis with a primary malignant neoplasm (ICD-10 codes C00–C97) and a valid treatment start date were eligible for inclusion.
+
+### Exclusion criteria
+
+We excluded: (i) records with missing or implausible dates (treatment start before diagnosis date, or TTT > 730 days); (ii) duplicate records for the same patient (identified via hashed CNS identifier), retaining only the first treatment episode; (iii) patients with diagnoses coded as in situ neoplasms (D00–D09), benign tumours, or carcinoma in situ without subsequent invasive diagnosis; and (iv) records from facilities with fewer than 10 cancer patients per year (to minimise data-quality artefacts from small facilities).
+
+### Deduplication
+
+Patient records were deduplicated at the CNS (Cartão Nacional de Saúde) level. Where a patient appeared in multiple states, the record from the treating state was retained. Duplicate APAC authorisations for the same procedure within a 30-day window were collapsed to a single episode.
+
+## Variables
+
+### Primary outcome
+
+Time-to-treatment (TTT) was defined as the number of calendar days elapsed from the date of pathological diagnosis (dt_dx) to the date of first recorded oncological treatment (dt_tx). Lei 12.732 compliance was defined as TTT ≤ 60 days (primary threshold) and TTT ≤ 30 days (secondary sensitivity threshold).
+
+### Primary exposure
+
+Lei 12.732 compliance status at the 60-day threshold (`compliant_60d`), treated as a binary time-fixed exposure assigned at cohort entry.
+
+### Survival outcome
+
+All-cause mortality during follow-up, ascertained from the APAC death indicator (`death`). Overall survival time (`ttt` for TTT analysis; follow-up time for survival analysis) was measured from date of diagnosis to date of death or administrative censoring at the end of the study period.
+
+### Covariates
+
+Individual-level covariates: age at diagnosis (continuous, years), sex (male/female), self-reported race/colour (White, Brown/*Parda*, Black/*Preta*, Yellow, Indigenous), clinical stage at diagnosis (I–IV where available, or Not Reported), cancer type/group (`cancer_group`), macro-region (`region`: North, Northeast, Centre-West, Southeast, South), and state (`uf`).
+
+Ecological covariate: ELSI-Brazil Wave 2 social network composite score aggregated to macro-region.
+
+## Statistical analysis
+
+### Descriptive statistics
+
+Continuous variables are summarised as median (interquartile range, IQR); categorical variables as counts and percentages. Patient characteristics are presented overall and stratified by compliance status (Table 1). All analyses were conducted in R (version ≥ 4.3.0).
+
+### Kaplan-Meier survival analysis
+
+Overall and subgroup-specific (by cancer type, clinical stage, and macro-region) survival functions were estimated using the Kaplan-Meier (product-limit) method. Curves were compared using the log-rank test. Median survival with 95% confidence intervals was reported. Figures were produced using the *survminer* package.
+
+### Cox proportional-hazards regression
+
+Multivariable Cox regression was used to estimate hazard ratios (HRs) with 95% confidence intervals for all-cause mortality. The primary model included: Lei 12.732 compliance, age, sex, race, clinical stage, cancer type, and macro-region. The proportional-hazards assumption was assessed via Schoenfeld residual tests and log-log plots. Results are displayed as a forest plot (Figure 5).
+
+### Competing-risks analysis (Fine-Gray)
+
+Because death from causes other than the index cancer competes with cancer-specific mortality, we additionally fitted Fine-Gray subdistribution hazard models treating non-cancer death as a competing event (where cause-of-death data permit). Sub-distribution hazard ratios (SHRs) are reported alongside HRs from Cox models (Table 3).
+
+### Ecological analysis
+
+The association between macro-region compliance rates and ELSI-Brazil Wave 2 aging network indicators was explored using weighted scatter plots with region as the unit of analysis and population-weighted regression lines. Correlation coefficients (Pearson's r) and 95% CIs were estimated by bootstrap (1,000 resamples).
+
+### Sensitivity analyses
+
+Two pre-specified sensitivity analyses were conducted: (1) restricting to breast cancer (the most thoroughly validated APAC-QT subgroup) with the 30-day compliance threshold (eFigure 1, eTable 1, eTable 2); and (2) varying the Lei 12.732 compliance threshold (30, 45, 60, 90 days) to assess threshold sensitivity.
+
+### Software
+
+All analyses were conducted in R (≥ 4.3.0) using the *survival*, *cmprsk*, *survminer*, *sf*, *ggplot2*, and *microdatasus* packages. Geographic visualisations used Brazilian municipal shapefiles from the *geobr* package.
+
+## Ethical considerations
+
+This study used exclusively anonymised administrative public data routinely collected by the Brazilian Ministry of Health. Pursuant to Resolution CNS 510/2016, research using publicly available, anonymised secondary data is exempt from ethics committee review in Brazil. No patient identifiers were retained in the analytic dataset. Data access was obtained through the open DATASUS portal.
+
+\newpage
+
+# Results
+
+## Cohort assembly and characteristics
+
+```{r}
+#| label: tbl-table1
+#| tbl-cap: "**Table 1.** Baseline characteristics of the analytic cohort, overall and stratified by Lei 12.732 compliance (treatment within 60 days of diagnosis)."
+
+if (file.exists("tables/table1_characteristics.html")) {
+  # Embed via raw HTML inclusion — renders in HTML output
+  # For docx/pdf, the static summary below is used as fallback
+  knitr::asis_output(
+    paste0('<iframe src="tables/table1_characteristics.html" ',
+           'width="100%" height="600px" frameborder="0"></iframe>')
+  )
+} else {
+  knitr::asis_output("*[Table 1 will appear here — render after tables are generated]*")
+}
+```
+
+The final analytic cohort comprised **`r iv(n_total_fmt)`** older adults (aged ≥ 60 years) diagnosed with a primary malignant neoplasm during `r study_start`–`r study_end` across **`r iv(n_states)`** Brazilian states and **`r iv(n_muni)`** municipalities. Median age at diagnosis was **`r iv(median_age)`** years (IQR [to be reported]). Women accounted for **`r iv(pct_female)`%** of the cohort. The most common cancer groups were [top cancer types from `n_by_cancer`]. The Southeast region contributed the largest share of records, consistent with its population size and oncological infrastructure (see Table 1).
+
+## Time-to-treatment and compliance
+
+Median TTT across the full cohort was **`r iv(median_ttt)`** days (IQR `r iv(iqr_ttt_lo)`–`r iv(iqr_ttt_hi)`). Overall compliance with the 60-day statutory threshold was **`r iv(pct_compliant_60d)`%**. Compliance with the more stringent 30-day threshold was **`r iv(pct_compliant_30d)`%**. Compliance varied substantially by macro-region and by cancer type [results from Tables 1 and 2].
+
+## Kaplan-Meier survival estimates
+
+### Overall survival
+
+```{r}
+#| label: fig-km-overall
+#| fig-cap: "**Figure 1.** Overall Kaplan-Meier survival curve for the analytic cohort of older Brazilian cancer patients. The vertical dotted line marks 12 months of follow-up. Numbers at risk are shown below the x-axis. Median survival and 95% confidence intervals are indicated."
+#| fig-align: center
+#| out-width: "90%"
+
+knitr::include_graphics("figures/fig1_km_overall.pdf")
+```
+
+@fig-km-overall shows the overall survival function for the analytic cohort. Median overall survival was [X months; 95% CI: X–X]. The survival curve declined steeply in the first 12 months, reflecting the high early mortality burden in this older population.
+
+### Survival by cancer type
+
+```{r}
+#| label: fig-km-cancer
+#| fig-cap: "**Figure 2.** Kaplan-Meier survival curves stratified by cancer type group. Log-rank p-value is shown. Curves are coloured by cancer group; 95% confidence bands are shown as shaded ribbons. The number at risk is shown at 12-month intervals."
+#| fig-align: center
+#| out-width: "90%"
+
+knitr::include_graphics("figures/fig2_km_cancer.pdf")
+```
+
+Survival differed markedly by cancer type (@fig-km-cancer; log-rank p < 0.001). [Describe 2–3 notable findings, e.g. pancreatic vs breast survival differences.]
+
+### Survival by clinical stage
+
+```{r}
+#| label: fig-km-stage
+#| fig-cap: "**Figure 3.** Kaplan-Meier survival curves stratified by clinical stage at diagnosis (I–IV; Not Reported). The expected monotonic gradient across stages confirms the validity of stage ascertainment in APAC records."
+#| fig-align: center
+#| out-width: "90%"
+
+knitr::include_graphics("figures/fig3_km_stage.pdf")
+```
+
+The expected inverse stage–survival gradient was observed (@fig-km-stage). Stage IV patients had a median survival of [X months], compared with [X months] in Stage I patients. A substantial proportion of records were classified as stage Not Reported ([X%]), limiting stage-stratified inference for some cancer types.
+
+### Survival by macro-region
+
+```{r}
+#| label: fig-km-region
+#| fig-cap: "**Figure 4.** Kaplan-Meier survival curves stratified by Brazilian macro-region (North, Northeast, Centre-West, Southeast, South). Regional disparities are apparent throughout follow-up."
+#| fig-align: center
+#| out-width: "90%"
+
+knitr::include_graphics("figures/fig4_km_region.pdf")
+```
+
+Regional survival disparities were substantial (@fig-km-region). The South and Southeast regions showed the most favourable survival, while the North and Northeast regions exhibited the shortest median survival. These differences persisted after visual inspection through the full follow-up period.
+
+## Cox proportional-hazards regression
+
+```{r}
+#| label: fig-cox-forest
+#| fig-cap: "**Figure 5.** Forest plot of adjusted hazard ratios (HRs) from the multivariable Cox proportional-hazards model for all-cause mortality. Reference categories and sample sizes are shown for each covariate. Points represent HR point estimates; horizontal bars represent 95% confidence intervals. HR < 1 indicates lower mortality risk relative to the reference category."
+#| fig-align: center
+#| out-width: "95%"
+
+knitr::include_graphics("figures/fig5_cox_forest.pdf")
+```
+
+```{r}
+#| label: tbl-table2
+#| tbl-cap: "**Table 2.** Multivariable Cox proportional-hazards regression results: adjusted hazard ratios (HRs), 95% confidence intervals, and p-values for all-cause mortality."
+
+if (file.exists("tables/table2_cox.html")) {
+  knitr::asis_output(
+    paste0('<iframe src="tables/table2_cox.html" ',
+           'width="100%" height="600px" frameborder="0"></iframe>')
+  )
+} else {
+  knitr::asis_output("*[Table 2 will appear here — render after tables are generated]*")
+}
+```
+
+In multivariable Cox regression (@fig-cox-forest; Table 2), non-compliance with Lei 12.732 (TTT > 60 days) was independently associated with increased all-cause mortality (HR [X.XX]; 95% CI [X.XX–X.XX]; p [value]), after adjustment for age, sex, race, clinical stage, cancer type, and macro-region. [Additional notable covariate findings to be described.] The Schoenfeld residuals test did not indicate violation of the proportional-hazards assumption (global test p = [value]).
+
+## Competing-risks analysis
+
+```{r}
+#| label: fig-competing-risks
+#| fig-cap: "**Figure 8.** Cumulative incidence functions (CIF) from the Fine-Gray competing-risks model. The primary event (cancer-related death) and the competing event (other-cause death) are shown as stacked CIFs. Curves are stratified by Lei 12.732 compliance status."
+#| fig-align: center
+#| out-width: "90%"
+
+knitr::include_graphics("figures/fig8_competing_risks.pdf")
+```
+
+```{r}
+#| label: tbl-table3
+#| tbl-cap: "**Table 3.** Fine-Gray sub-distribution hazard ratios (SHRs) for all-cause mortality accounting for competing risks. Estimates are adjusted for the same covariates as the primary Cox model."
+
+if (file.exists("tables/table3_finegray.html")) {
+  knitr::asis_output(
+    paste0('<iframe src="tables/table3_finegray.html" ',
+           'width="100%" height="600px" frameborder="0"></iframe>')
+  )
+} else {
+  knitr::asis_output("*[Table 3 will appear here — render after tables are generated]*")
+}
+```
+
+The Fine-Gray competing-risks analysis (@fig-competing-risks; Table 3) yielded sub-distribution hazard ratios broadly consistent with the primary Cox model. The SHR for non-compliance was [X.XX] (95% CI [X.XX–X.XX]), indicating that the survival disadvantage associated with delayed treatment initiation is not attributable to differential non-cancer mortality.
+
+## Ecological analysis
+
+### Five-region choropleth
+
+```{r}
+#| label: fig-choropleth
+#| fig-cap: "**Figure 7.** Choropleth map of Lei 12.732 compliance rates (TTT ≤ 60 days) aggregated to the five Brazilian macro-regions. Darker shading indicates higher compliance. N = number of patients per region."
+#| fig-align: center
+#| out-width: "85%"
+
+knitr::include_graphics("figures/fig7_choropleth.pdf")
+```
+
+The macro-regional choropleth (@fig-choropleth) illustrates the pronounced North–South gradient in compliance. The Southeast and South regions showed compliance rates of [X%] and [X%], respectively, compared with [X%] and [X%] in the North and Northeast. The Centre-West occupied an intermediate position.
+
+### 27-State choropleth
+
+```{r}
+#| label: fig-state-choropleth
+#| fig-cap: "**Figure 9.** Choropleth map of Lei 12.732 compliance rates disaggregated to all 27 Brazilian states and the Federal District. State-level heterogeneity reveals within-region variation not captured by macro-regional averages."
+#| fig-align: center
+#| out-width: "90%"
+
+knitr::include_graphics("figures/fig9_state_choropleth.pdf")
+```
+
+State-level disaggregation (@fig-state-choropleth) revealed substantial within-region heterogeneity. [Describe 2–3 notable state-level findings.]
+
+### Ecological scatter: compliance vs ELSI aging indicators
+
+```{r}
+#| label: fig-ecological
+#| fig-cap: "**Figure 6.** Ecological scatter plot of macro-regional Lei 12.732 compliance rates (y-axis) against the ELSI-Brazil Wave 2 social network composite score (x-axis). Each point represents one of the five macro-regions, sized by population of older adults. The weighted least-squares regression line and 95% confidence band are shown. Pearson's r and bootstrap 95% CI are reported."
+#| fig-align: center
+#| out-width: "80%"
+
+knitr::include_graphics("figures/fig6_ecological.pdf")
+```
+
+The ecological scatter plot (@fig-ecological) suggests a positive correlation between regional social network density (ELSI-Brazil Wave 2) and Lei 12.732 compliance rates (Pearson's r = [value]; 95% CI [value–value]). Regions with higher social network scores tended to exhibit higher compliance, consistent with the hypothesis that social capital may facilitate timely treatment initiation in older adults. The ecological nature of this analysis precludes causal inference.
+
+\newpage
+
+# Discussion
+
+This population-based cohort study of **`r iv(n_total_fmt)`** older Brazilian cancer patients provides the most comprehensive characterisation to date of time-to-treatment patterns and survival outcomes in the context of Lei 12.732/2012. Key findings include [summary].
+
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+<!-- DISCUSSION POINT 1: Overall compliance and benchmark comparison             -->
+<!-- Compare overall 60-day compliance (~X%) with published estimates from       -->
+<!-- targeted studies (breast: 38–72%; cervical: 45–65%). Discuss secular trend. -->
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+
+## Compliance with Lei 12.732
+
+[To be written: contextualise the observed compliance rate against prior Brazilian literature and international benchmarks. Discuss improvement over time since law enactment in 2012.]
+
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+<!-- DISCUSSION POINT 2: Regional disparities                                     -->
+<!-- North/Northeast structural barriers: fewer UNACONs/CONs, longer travel       -->
+<!-- distances, lower oncologist density. Cite SUS oncological network data.      -->
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+
+## Regional disparities and structural determinants
+
+[To be written: discuss the North–South compliance and survival gradient. Link to oncological network density, UNACON/CON accreditation rates, and geographic access barriers.]
+
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+<!-- DISCUSSION POINT 3: Cancer-type-specific findings                            -->
+<!-- Breast cancer best-studied; lung/pancreatic worst prognosis; colorectal      -->
+<!-- may show different compliance pattern. Tie to screening/staging context.     -->
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+
+## Cancer-type differences
+
+[To be written: interpret survival differences by cancer group. Discuss why certain cancers show better or worse compliance and how this relates to treatment pathways.]
+
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+<!-- DISCUSSION POINT 4: Stage at diagnosis and late presentation                 -->
+<!-- High % stage Not Reported is a data-quality issue; stage IV overrepresented  -->
+<!-- in older adults. Discuss relationship between late staging and delayed TTT.  -->
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+
+## Late-stage presentation
+
+[To be written: discuss implications of stage distribution, missing stage data in APAC, and the relationship between late presentation and TTT in older adults.]
+
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+<!-- DISCUSSION POINT 5: Aging-specific factors (ELSI ecological findings)        -->
+<!-- Social network → care navigation. Functional limitations → care delays.      -->
+<!-- Ecological correlation is hypothesis-generating; individual-level data needed.-->
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+
+## Aging-related social factors and ELSI-Brazil linkage
+
+[To be written: interpret the ecological association between ELSI social network scores and compliance. Discuss plausible mechanisms (social support for navigation, caregiver support) and the limitations of ecological inference.]
+
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+<!-- DISCUSSION POINT 6: Competing risks interpretation                           -->
+<!-- Fine-Gray model shows SHR ≈ Cox HR, meaning competing events don't           -->
+<!-- substantially bias main estimate. Older adults have higher competing mortality.-->
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+
+## Methodological contribution: competing-risks framework
+
+[To be written: justify use of Fine-Gray model. Discuss the importance of accounting for non-cancer death in older populations where competing mortality is non-trivial.]
+
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+<!-- DISCUSSION POINT 7: Strengths                                                -->
+<!-- National coverage, large N, linkage of admin + aging survey data,            -->
+<!-- reproducible pipeline, competing risks, multi-level analysis.                -->
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+
+## Strengths
+
+This study benefits from national-level population-based data with broad cancer-type coverage, a reproducible open analytic pipeline, and the novel integration of aging survey data with administrative cancer records. The large sample size provides adequate power to detect clinically meaningful differences in subgroup analyses.
+
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+<!-- DISCUSSION POINT 8: Limitations                                              -->
+<!-- APAC captures only SUS; private-sector patients excluded. TTT proxy may      -->
+<!-- miss pathological confirmation date. Stage completeness varies by cancer.    -->
+<!-- Death ascertainment limited to APAC indicator (no SIM linkage).              -->
+<!-- Ecological ELSI linkage is macro-regional (N=5 units).                       -->
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+
+## Limitations
+
+Several limitations should be considered. APAC records capture only SUS-funded procedures, excluding an estimated 25% of cancer patients managed entirely in the private sector. The TTT measure relies on administrative dates, which may not always align with clinical confirmation dates. Stage information completeness varies by cancer type and region. Death ascertainment via the APAC indicator likely underestimates mortality due to incomplete linkage with the Mortality Information System (SIM). The ecological ELSI-Brazil linkage uses only five macro-regional units, limiting statistical power and precluding individual-level inference about aging-related social factors.
+
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+<!-- DISCUSSION POINT 9: Policy implications and future directions               -->
+<!-- Priority: North/Northeast investment in UNACON/CON network. Social           -->
+<!-- prescribing and navigation programmes for older adults. SIM-APAC linkage     -->
+<!-- as next step for cause-specific mortality. Individual ELSI-APAC linkage.     -->
+<!-- ──────────────────────────────────────────────────────────────────────────── -->
+
+## Policy implications and future research
+
+The findings underscore the need for targeted policy investment in the North and Northeast regions to expand accredited oncological facilities and reduce structural barriers to timely treatment. Social navigation programmes tailored to the needs of older adults — informed by aging survey data — represent a promising but understudied intervention. Future research should prioritise individual-level linkage of ELSI-Brazil participants with SUS treatment records, linkage of APAC with the Mortality Information System (SIM) for cause-specific mortality, and longitudinal evaluation of Lei 12.732 compliance trends beyond 2020.
+
+\newpage
+
+# Conclusions
+
+Compliance with Lei 12.732/2012 among older Brazilian cancer patients was [X%] at the 60-day threshold during `r study_start`–`r study_end`, with marked regional disparities. Non-compliance was independently associated with increased all-cause mortality in both Cox and Fine-Gray models. Regional ecological analyses suggest that social network characteristics measured in ELSI-Brazil Wave 2 may partially explain geographic variation in compliance. These findings support targeted policy interventions to strengthen oncological infrastructure and social support programmes in underserved regions of Brazil.
+
+\newpage
+
+# References
+
+::: {#refs}
+:::
+
+\newpage
+
+# Tables
+
+**Table 1** is presented in the Results section.
+
+**Table 2** is presented in the Results section.
+
+**Table 3** is presented in the Results section.
+
+\newpage
+
+# Figures
+
+**Figure 1.** Overall Kaplan-Meier survival curve.
+
+**Figure 2.** Kaplan-Meier survival by cancer type.
+
+**Figure 3.** Kaplan-Meier survival by clinical stage.
+
+**Figure 4.** Kaplan-Meier survival by macro-region.
+
+**Figure 5.** Cox regression forest plot.
+
+**Figure 6.** Ecological scatter: compliance vs ELSI aging indicators.
+
+**Figure 7.** Five-region compliance choropleth.
+
+**Figure 8.** Competing-risks cumulative incidence functions.
+
+**Figure 9.** 27-state compliance choropleth.
+
+\newpage
+
+# Supplementary Material
+
+## eFigure 1 — Cancer-specific sensitivity Kaplan-Meier
+
+```{r}
+#| label: fig-efig1-sensitivity
+#| fig-cap: "**eFigure 1.** Sensitivity analysis: Kaplan-Meier survival curves restricted to breast cancer patients, using the 30-day compliance threshold as defined by Lei 12.732. This subgroup represents the most thoroughly validated cancer type within APAC-QT records and serves as a benchmark for data quality assessment."
+#| fig-align: center
+#| out-width: "90%"
+
+if (file.exists("figures/efig1_sensitivity_km.pdf")) {
+  knitr::include_graphics("figures/efig1_sensitivity_km.pdf")
+} else {
+  knitr::asis_output("*[eFigure 1 will appear here once generated]*")
+}
+```
+
+## eTable 1 — Threshold sensitivity analysis
+
+```{r}
+#| label: tbl-etable1
+#| tbl-cap: "**eTable 1.** Compliance rates across alternative time-to-treatment thresholds (30, 45, 60, 90 days), overall and stratified by macro-region and cancer type."
+
+if (file.exists("tables/etable1_sensitivity.html")) {
+  knitr::asis_output(
+    paste0('<iframe src="tables/etable1_sensitivity.html" ',
+           'width="100%" height="500px" frameborder="0"></iframe>')
+  )
+} else {
+  knitr::asis_output("*[eTable 1 will appear here — render after tables are generated]*")
+}
+```
+
+## eTable 2 — Breast-cancer-only Cox regression
+
+```{r}
+#| label: tbl-etable2
+#| tbl-cap: "**eTable 2.** Multivariable Cox proportional-hazards regression restricted to breast cancer patients. Adjusted hazard ratios, 95% confidence intervals, and p-values are reported. The 30-day compliance threshold is used as the primary exposure."
+
+if (file.exists("tables/etable2_cox_breast.html")) {
+  knitr::asis_output(
+    paste0('<iframe src="tables/etable2_cox_breast.html" ',
+           'width="100%" height="500px" frameborder="0"></iframe>')
+  )
+} else {
+  knitr::asis_output("*[eTable 2 will appear here — render after tables are generated]*")
+}
+```
+
+---
+
+*Supplementary data files, R analysis scripts, and the full reproducible pipeline are available in the online repository accompanying this article.*

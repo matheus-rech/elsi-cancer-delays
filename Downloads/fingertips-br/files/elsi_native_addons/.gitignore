@@ -1,0 +1,10 @@
+# Large data files (regenerate with scripts 01-02)
+analysis/data/*.rds
+analysis/data/*.log
+app/elsi_data.csv
+app/apac_*.rds
+
+# R artifacts
+.Rhistory
+.RData
+.Rproj.user/
