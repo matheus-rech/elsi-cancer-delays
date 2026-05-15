@@ -81,14 +81,29 @@ jobs:
       - name: "Script 02: Build national cohort"
         run: Rscript analysis/02_build_apac_cohort.R
 
+      - name: Detect ELSI private data
+        id: elsi_data
+        run: |
+          if [ -f app/elsi_data.csv ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::app/elsi_data.csv not found; skipping scripts that require ELSI data"
+          fi
+
       - name: "Script 03: ELSI regional summary"
+        if: steps.elsi_data.outputs.available == 'true'
         run: Rscript analysis/03_elsi_regional.R
 
-      - name: "Scripts 04-08: Figures and tables"
+      - name: "Scripts 04-06: Core figures and tables"
         run: |
           Rscript analysis/04_km_figures.R
           Rscript analysis/05_cox_regression.R
           Rscript analysis/06_table1.R
+
+      - name: "Scripts 07-08: ELSI-dependent analyses"
+        if: steps.elsi_data.outputs.available == 'true'
+        run: |
           Rscript analysis/07_ecological.R
           Rscript analysis/08_choropleth.R
 
@@ -105,11 +120,16 @@ jobs:
         run: |
           FIGS=$(ls analysis/figures/*.pdf 2>/dev/null | wc -l)
           TABS=$(ls analysis/tables/*.html 2>/dev/null | wc -l)
+          if [ "${{ steps.elsi_data.outputs.available }}" = "true" ]; then
+            MIN_FIGS=9
+          else
+            MIN_FIGS=8
+          fi
           echo "Figures: $FIGS | Tables: $TABS"
           ls -lh analysis/figures/*.pdf
           ls -lh analysis/tables/*.html
-          if [ "$FIGS" -lt 9 ] || [ "$TABS" -lt 5 ]; then
-            echo "ERROR: Missing outputs (expected >=9 PDFs, >=5 HTMLs)"
+          if [ "$FIGS" -lt "$MIN_FIGS" ] || [ "$TABS" -lt 5 ]; then
+            echo "ERROR: Missing outputs (expected >=$MIN_FIGS PDFs, >=5 HTMLs)"
             exit 1
           fi
 
