@@ -4,14 +4,18 @@ on:
   push:
     branches: [main]
     paths:
-      - 'analysis/**'
-      - 'app/app.R'
+      - 'Downloads/fingertips-br/files/elsi_native_addons/analysis/**'
+      - 'Downloads/fingertips-br/files/elsi_native_addons/app/app.R'
       - '.github/workflows/analysis-pipeline.yml'
   workflow_dispatch:
 
 concurrency:
   group: analysis-${{ github.ref }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: Downloads/fingertips-br/files/elsi_native_addons
 
 jobs:
   run-pipeline:
