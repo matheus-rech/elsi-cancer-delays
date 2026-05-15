@@ -31,11 +31,13 @@ download_if_missing <- function(filename, destdir) {
   cat(sprintf("[%s] Downloading from GitHub Release...\n", filename))
   download.file(url, dest, mode = "wb", quiet = FALSE)
   cat(sprintf("[%s] Done (%.1f MB)\n", filename, file.size(dest) / 1024^2))
+  if (file.size(dest) < 10000) stop("Download appears truncated: ", dest)
   dest
 }
 
-wave2_path    <- download_if_missing("ELSI.English.2nd.wave.stata13.dta", DATA_DIR)
-baseline_path <- download_if_missing("ELSI.English.baseline.stata13.dta", DATA_DIR)
+wave2_path <- download_if_missing("ELSI.English.2nd.wave.stata13.dta", DATA_DIR)
+# Baseline DTA available in release but not used in current analysis
+# baseline_path <- download_if_missing("ELSI.English.baseline.stata13.dta", DATA_DIR)
 
 # ── 2. Read DTA (preserving labels) ──────────────────────────────────────────
 cat("\nReading Wave 2 DTA...\n")
@@ -70,9 +72,10 @@ out <- d %>%
     race          = as.integer(e9),
     education_yrs = as.numeric(e22),
     n_children    = as.numeric(e11),
-    income_pc     = as.numeric(if ("rendadompc" %in% names(d)) rendadompc
-                               else if ("percapita_income" %in% names(d)) percapita_income
-                               else calibrated_weight * NA),  # fallback
+    income_pc     = as.numeric(
+      if ("house_income_pc" %in% names(d)) house_income_pc
+      else if ("rendadompc" %in% names(d)) rendadompc
+      else NA_real_),
 
     # Survey design
     weight        = as.numeric(calibrated_weight),

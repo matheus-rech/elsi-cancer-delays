@@ -43,6 +43,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Create diagnostic issue for Copilot
+        id: create_issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FAILED_STEP: ${{ steps.parse.outputs.failed_step }}
@@ -85,16 +86,22 @@ jobs:
 
           TITLE="CI Fix: Analysis pipeline failure in run #${RUN_ID}"
 
-          gh issue create \
+          ISSUE_URL=$(gh issue create \
             --repo "$REPO" \
             --title "$TITLE" \
             --label "bug,ci-fix" \
-            --body "$BODY"
+            --body "$BODY")
+
+          ISSUE_NUM=$(echo "$ISSUE_URL" | grep -oE '[0-9]+$')
+          echo "Created issue #${ISSUE_NUM}"
+          echo "issue_num=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
 
       - name: Assign Copilot coding agent
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ steps.create_issue.outputs.issue_num }}
         run: |
-          ISSUE_NUM=$(gh issue list --repo "$REPO" --limit 1 --json number --jq '.[0].number')
-          gh issue edit "$ISSUE_NUM" --repo "$REPO" --add-assignee "copilot[bot]" 2>/dev/null || \
-            echo "Note: Enable Copilot coding agent at Settings > Copilot > Coding agent"
+          if [ -n "$ISSUE_NUM" ]; then
+            gh issue edit "$ISSUE_NUM" --repo "$REPO" --add-assignee "copilot[bot]" 2>/dev/null || \
+              echo "Note: Enable Copilot coding agent at Settings > Copilot > Coding agent"
+          fi
