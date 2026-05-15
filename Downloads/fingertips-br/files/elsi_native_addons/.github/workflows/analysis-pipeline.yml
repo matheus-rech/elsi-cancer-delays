@@ -1,0 +1,133 @@
+name: Analysis Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'analysis/**'
+      - 'app/app.R'
+      - '.github/workflows/analysis-pipeline.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: analysis-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      R_LIBS_USER: ${{ github.workspace }}/R-lib
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.4.1'
+          use-public-rspm: true
+
+      - name: Cache R packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: r-pkgs-${{ runner.os }}-${{ hashFiles('analysis/*.R') }}
+          restore-keys: r-pkgs-${{ runner.os }}-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcurl4-openssl-dev libssl-dev libxml2-dev \
+            libgdal-dev libgeos-dev libproj-dev libudunits2-dev \
+            libfontconfig1-dev libharfbuzz-dev libfribidi-dev \
+            libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev
+
+      - name: Install R packages
+        run: |
+          dir.create(Sys.getenv("R_LIBS_USER"), recursive = TRUE, showWarnings = FALSE)
+          .libPaths(Sys.getenv("R_LIBS_USER"))
+          install.packages("pak", lib = Sys.getenv("R_LIBS_USER"))
+          pak::pak(c(
+            "microdatasus", "dplyr", "tidyr", "lubridate",
+            "survival", "survminer", "tidycmprsk", "ggsurvfit",
+            "srvyr", "survey", "ggplot2", "patchwork",
+            "gtsummary", "gt", "broom",
+            "geobr", "sf", "RColorBrewer", "ggrepel",
+            "scales", "readr", "aod"
+          ), lib = Sys.getenv("R_LIBS_USER"))
+        shell: Rscript {0}
+
+      - name: Cache DATASUS downloads
+        uses: actions/cache@v4
+        with:
+          path: analysis/data/apac_qt_*_2022.rds
+          key: datasus-apac-qt-27uf-2022-v1
+
+      - name: "Script 01: Download APAC-QT (27 UFs)"
+        run: Rscript analysis/01_download_apac.R
+        timeout-minutes: 90
+
+      - name: "Script 02: Build national cohort"
+        run: Rscript analysis/02_build_apac_cohort.R
+
+      - name: "Script 03: ELSI regional summary"
+        run: Rscript analysis/03_elsi_regional.R
+
+      - name: "Scripts 04-08: Figures and tables"
+        run: |
+          Rscript analysis/04_km_figures.R
+          Rscript analysis/05_cox_regression.R
+          Rscript analysis/06_table1.R
+          Rscript analysis/07_ecological.R
+          Rscript analysis/08_choropleth.R
+
+      - name: "Script 09: Competing risks"
+        run: Rscript analysis/09_competing_risks.R
+
+      - name: "Script 10: Sensitivity analyses"
+        run: Rscript analysis/10_sensitivity.R
+
+      - name: "Script 11: State choropleth"
+        run: Rscript analysis/11_state_choropleth.R
+
+      - name: Verify outputs
+        run: |
+          FIGS=$(ls analysis/figures/*.pdf 2>/dev/null | wc -l)
+          TABS=$(ls analysis/tables/*.html 2>/dev/null | wc -l)
+          echo "Figures: $FIGS | Tables: $TABS"
+          ls -lh analysis/figures/*.pdf
+          ls -lh analysis/tables/*.html
+          if [ "$FIGS" -lt 9 ] || [ "$TABS" -lt 5 ]; then
+            echo "ERROR: Missing outputs (expected >=9 PDFs, >=5 HTMLs)"
+            exit 1
+          fi
+
+      - name: Upload figures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publication-figures
+          path: analysis/figures/*.pdf
+          retention-days: 30
+
+      - name: Upload tables
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publication-tables
+          path: analysis/tables/*.html
+          retention-days: 30
+
+      - name: Upload cohort summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cohort-data
+          path: |
+            analysis/data/apac_cohort.rds
+            analysis/data/elsi_regional.rds
+          retention-days: 14
