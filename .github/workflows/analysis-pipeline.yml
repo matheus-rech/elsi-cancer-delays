@@ -56,7 +56,7 @@ jobs:
           .libPaths(Sys.getenv("R_LIBS_USER"))
           install.packages("pak", lib = Sys.getenv("R_LIBS_USER"))
           pak::pak(c(
-            "rfsaldanha/microdatasus", "dplyr", "tidyr", "lubridate",
+            "haven", "rfsaldanha/microdatasus", "dplyr", "tidyr", "lubridate",
             "survival", "survminer", "tidycmprsk", "ggsurvfit",
             "srvyr", "survey", "ggplot2", "patchwork",
             "gtsummary", "gt", "broom",
@@ -64,6 +64,9 @@ jobs:
             "scales", "readr", "aod"
           ), lib = Sys.getenv("R_LIBS_USER"))
         shell: Rscript {0}
+
+      - name: "Script 00: Download ELSI DTA + prepare data"
+        run: Rscript analysis/00_prepare_data.R
 
       - name: Cache DATASUS downloads
         uses: actions/cache@v4
