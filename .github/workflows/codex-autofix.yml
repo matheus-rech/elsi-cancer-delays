@@ -1,0 +1,100 @@
+name: Codex Auto-Diagnosis
+
+on:
+  workflow_run:
+    workflows: ["Analysis Pipeline"]
+    types: [completed]
+
+jobs:
+  diagnose-and-fix:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+      actions: read
+
+    env:
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download failed run logs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run view "$RUN_ID" --repo "$REPO" --log-failed > /tmp/failed-logs.txt 2>&1 || true
+          tail -200 /tmp/failed-logs.txt > /tmp/trimmed-logs.txt
+
+      - name: Identify failed step
+        id: parse
+        run: |
+          FAILED_STEP=$(grep -oP '(?<=##\[error\]).*' /tmp/failed-logs.txt | head -1 || echo "Unknown step")
+          echo "failed_step=$FAILED_STEP" >> "$GITHUB_OUTPUT"
+
+          R_ERROR=$(grep -A5 "Error in\|Error:" /tmp/failed-logs.txt | head -10 || echo "No R error found")
+          {
+            echo "r_error<<EOF"
+            echo "$R_ERROR"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create diagnostic issue for Copilot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FAILED_STEP: ${{ steps.parse.outputs.failed_step }}
+          R_ERROR: ${{ steps.parse.outputs.r_error }}
+        run: |
+          LOGS=$(cat /tmp/trimmed-logs.txt)
+
+          BODY=$(cat <<'TEMPLATE'
+          ## Analysis Pipeline Failed
+
+          **Failed step:** PLACEHOLDER_STEP
+
+          ### R Error
+          ```
+          PLACEHOLDER_RERROR
+          ```
+
+          ### Task for Copilot
+
+          1. Read the failed logs below and identify the root cause
+          2. Check the corresponding R script in `analysis/` for the bug
+          3. Fix the script so the pipeline passes
+          4. Do NOT modify data download logic or DATASUS FTP URLs
+          5. Scripts run sequentially: 01 -> 02 -> 03 -> 04-08 -> 09 -> 10 -> 11
+          6. Input is `analysis/data/apac_cohort.rds` with columns:
+             cns, cid, dt_dx, dt_tx, age, sex, race, municipio, uf, uf_download,
+             stage, death, ttt, sex_label, age_grp, stage_label, cancer_group,
+             uf_name, region, compliant_60d, compliant_30d
+
+          ### Logs (last 200 lines)
+          ```
+          PLACEHOLDER_LOGS
+          ```
+          TEMPLATE
+          )
+
+          BODY="${BODY//PLACEHOLDER_STEP/$FAILED_STEP}"
+          BODY="${BODY//PLACEHOLDER_RERROR/$R_ERROR}"
+          BODY="${BODY//PLACEHOLDER_LOGS/$LOGS}"
+
+          TITLE="CI Fix: Analysis pipeline failure in run #${RUN_ID}"
+
+          gh issue create \
+            --repo "$REPO" \
+            --title "$TITLE" \
+            --label "bug,ci-fix" \
+            --body "$BODY"
+
+      - name: Assign Copilot coding agent
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_NUM=$(gh issue list --repo "$REPO" --limit 1 --json number --jq '.[0].number')
+          gh issue edit "$ISSUE_NUM" --repo "$REPO" --add-assignee "copilot[bot]" 2>/dev/null || \
+            echo "Note: Enable Copilot coding agent at Settings > Copilot > Coding agent"
