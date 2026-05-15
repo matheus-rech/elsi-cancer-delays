@@ -59,7 +59,7 @@ jobs:
             "haven", "rfsaldanha/microdatasus", "dplyr", "tidyr", "lubridate",
             "survival", "survminer", "tidycmprsk", "ggsurvfit",
             "srvyr", "survey", "ggplot2", "patchwork",
-            "gtsummary", "gt", "broom",
+            "gtsummary", "gt", "broom", "broom.helpers",
             "geobr", "sf", "RColorBrewer", "ggrepel",
             "scales", "readr", "aod"
           ), lib = Sys.getenv("R_LIBS_USER"))
